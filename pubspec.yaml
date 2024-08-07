@@ -13,6 +13,7 @@ dependencies:
     sdk: flutter
   flutter_cube: ^0.1.1
   dchs_motion_sensors: ^1.1.0
+  blurhash_ffi: ^1.2.6
 
 dev_dependencies:
   flutter_test:

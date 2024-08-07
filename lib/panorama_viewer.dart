@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
+import 'package:blurhash_ffi/blurhash_ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cube/flutter_cube.dart';
 import 'package:dchs_motion_sensors/dchs_motion_sensors.dart';
@@ -48,6 +49,7 @@ class PanoramaViewer extends StatefulWidget {
     this.onLongPressEnd,
     this.onImageLoad,
     this.child,
+    this.background,
     this.hotspots,
   });
 
@@ -132,6 +134,9 @@ class PanoramaViewer extends StatefulWidget {
   /// Specify an Image(equirectangular image) widget to the panorama.
   final Image? child;
 
+  /// Specify the thumbnail version of the panorama.
+  final Image? background;
+
   /// Place widgets in the panorama.
   final List<Hotspot>? hotspots;
 
@@ -143,6 +148,7 @@ class PanoramaState extends State<PanoramaViewer>
     with SingleTickerProviderStateMixin {
   Scene? scene;
   Object? surface;
+  Object? surface1;
   late double latitudeRad;
   late double longitudeRad;
   double latitudeDelta = 0;
@@ -150,8 +156,8 @@ class PanoramaState extends State<PanoramaViewer>
   double zoomDelta = 0;
   late Offset _lastFocalPoint;
   double? _lastZoom;
-  double _radius = 500;
-  double _dampingFactor = 0.05;
+  final double _radius = 500;
+  final double _dampingFactor = 0.05;
   double _animateDirection = 1.0;
   double _animSpeed = 0.0;
   late AnimationController _controller;
@@ -332,9 +338,21 @@ class PanoramaState extends State<PanoramaViewer>
     surface?.mesh.texture = imageInfo.image;
     surface?.mesh.textureRect = Rect.fromLTWH(0, 0,
         imageInfo.image.width.toDouble(), imageInfo.image.height.toDouble());
-    scene!.texture = imageInfo.image;
-    scene!.update();
     widget.onImageLoad?.call();
+
+    scene!.updateTexture();
+  }
+
+  Future<void> _updateBgTexture() async {
+    final blurred = await BlurhashFFI.encode(widget.background!.image);
+    final image = await widget.background!.image.getImage();
+    surface1?.mesh.texture = await BlurhashFFI.decode(
+      blurred,
+      width: image.width,
+      height: image.height,
+    );
+    surface1?.mesh.textureRect =
+        Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
   }
 
   void _loadTexture(ImageProvider? provider) {
@@ -345,7 +363,11 @@ class PanoramaState extends State<PanoramaViewer>
     _imageStream!.addListener(listener);
   }
 
-  void _onSceneCreated(Scene scene) {
+  bool get needBg =>
+      widget.background != null &&
+      widget.croppedArea != const Rect.fromLTWH(0.0, 0.0, 1.0, 1.0);
+
+  Future<void> _onSceneCreated(Scene scene) async {
     this.scene = scene;
     scene.camera.near = 1.0;
     scene.camera.far = _radius + 1.0;
@@ -360,9 +382,32 @@ class PanoramaState extends State<PanoramaViewer>
           croppedArea: widget.croppedArea,
           croppedFullWidth: widget.croppedFullWidth,
           croppedFullHeight: widget.croppedFullHeight);
-      surface = Object(name: 'surface', mesh: mesh, backfaceCulling: false);
-      _loadTexture(widget.child!.image);
+      surface = Object(
+        name: 'surface',
+        mesh: mesh,
+        backfaceCulling: false,
+        scale: Vector3(0.95, 0.95, 0.95),
+      );
       scene.world.add(surface!);
+
+      if (needBg) {
+        try {
+          final Mesh mesh1 = generateSphereMesh(
+            radius: _radius,
+            latSegments: widget.latSegments,
+            lonSegments: widget.lonSegments,
+          );
+          surface1 = Object(
+            name: 'surface',
+            mesh: mesh1,
+            backfaceCulling: false,
+            scale: Vector3(1.0, 1.0, 1.0),
+          );
+          scene.world.add(surface1!);
+          await _updateBgTexture();
+        } catch (_) {}
+      }
+      _loadTexture(widget.child?.image);
       _updateView();
     }
   }
@@ -670,4 +715,23 @@ Quaternion orientationToQuaternion(Vector3 v) {
   m.rotateX(v.y);
   m.rotateY(v.x);
   return Quaternion.fromRotation(m.getRotation());
+}
+
+extension ImageTool on ImageProvider {
+  Future<ui.Image> getImage() async {
+    final imageStream = resolve(const ImageConfiguration());
+    final Completer<ui.Image?> completer = Completer<ui.Image?>();
+    final ImageStreamListener listener = ImageStreamListener(
+      (imageInfo, synchronousCall) async {
+        final image = imageInfo.image;
+        if (!completer.isCompleted) {
+          completer.complete(image);
+        }
+      },
+    );
+    imageStream.addListener(listener);
+    final imageBytes = await completer.future;
+    imageStream.removeListener(listener);
+    return imageBytes!;
+  }
 }

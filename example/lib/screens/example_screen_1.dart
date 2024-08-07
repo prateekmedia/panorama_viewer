@@ -16,9 +16,11 @@ class ExampleScreen1State extends State<ExampleScreen1> {
         title: Text(widget.title),
       ),
       body: PanoramaViewer(
-        animSpeed: .1,
-        sensorControl: SensorControl.orientation,
-        child: Image.asset('assets/panorama1.webp'),
+        croppedArea: const Rect.fromLTWH(2533.0, 1265.0, 5065.0, 2533.0),
+        croppedFullWidth: 10132.0,
+        croppedFullHeight: 5066.0,
+        background: Image.asset('assets/panorama_cropped_thumb.jpg'),
+        child: Image.asset('assets/panorama_cropped.jpg'),
       ),
     );
   }
